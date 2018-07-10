@@ -518,7 +518,7 @@ def gradDescent(prefix,spikes,stim,jack,fsize,extrapSteps=10,
     ng = len(gsize)
     print 'Grid size ',gsize
 
-    assert model in ['softplus','linearSoftplu','logistic','linearLogistic']
+    assert model in ['softplus','linearSoftplus','logistic','linearLogistic']
     print 'Model ',model
     if model == 'softplus':
         resp = respSP
@@ -697,9 +697,31 @@ def gradDescent(prefix,spikes,stim,jack,fsize,extrapSteps=10,
             print 'Output files exist'
             return
         else:
-            # If start is a Params object, copy it
+
             if isinstance(start,Params):
-                P = start.copy()
+                # If start is a Params object with the right number of parameters, copy it
+                if len(start) == len(shapes):
+                    P = start.copy()
+                # If start is a linear model, create J from random stimulus combinations
+                else:
+                    # Linear models have one less parameter
+                    assert len(start) == len(shapes)-1
+
+                    # Create J from randomly weighted stimulus patches
+                    RS = RandomState()
+                    J = zeros(2*start[1].shape)
+                    for j in pr:
+                        r = RS.randn(NGRID).reshape(gsize)
+                        J += tdot(S[j,...],S[j,...]*r,(range(-ng,0),range(-ng,0)))
+
+                    # Initialize J so that it starts small relative to the linear term
+                    J *= 0.00001*norm(start[1])/norm(J)
+
+                    # Insert J into P
+                    P = start.copy().getParams()
+                    P.insert(2,J)
+                    P = Params(P)
+
             # If start is a list/tuple, reshape values and convert to Params
             elif isinstance(start,list) or isinstance(start,tuple):
                 assert len(start) == len(shapes)
