@@ -5,6 +5,7 @@ Created on Thu Mar 19 12:22:03 2015
 @author: rrowekamp
 """
 from numpy import zeros,array,ones,exp,log,angle,mgrid,dot,pi,sqrt,inf,arange
+from numpy import isfinite
 from numpy.random import RandomState
 from numpy.linalg import eigh,norm
 from pickle import dump
@@ -223,6 +224,10 @@ class DETrainer(object):
 
         self.Bound = Bound
         self.NG = NG
+        
+        self.converged = 0
+        self.its = 0
+        self.itmax = None
 
         if DEP is None:
             self.addtype,self.pmin,self.pmax = self.func.paramsInit(*args)
@@ -231,9 +236,11 @@ class DETrainer(object):
                                     self.pmax,self.NG)
             else:
                 self.DEP = DEParams(self.func,self.addtype,NG=self.NG)
+            self.set = False
         else:
             assert isinstance(DEP,DEParams)
             self.DEP = DEP
+            self.set = True
 
     """
     Optimizes function using differential evolution steps.
@@ -244,28 +251,59 @@ class DETrainer(object):
         mindelta: Minimum improvement in mean error to continue training
         saveFile: File to save current state after every iteration
     """
-    def train(self,NT=inf,reset=True,verbose=False,mindelta=0,saveFile=None):
+    def train(self,
+              NT=inf, # Maximum number of iterations
+              reset=False, # Whether to start with new parameters
+              verbose=False, # Whether to print status after every iteration
+              mindelta=0, # Minimum change required to continue
+              saveFile=None, # File to save intermediate results to
+              tag='', # Tag to add to verbose output
+              target_error=None): # Target error for convergence
 
-        if reset:
+        if reset or self.set == False:
             if self.Bound:
                 self.DEP.randomParams()
             else:
                 self.DEP.randomParams(self.pmin,self.pmax)
             self.DEP.eval()
+            self.set = True
+            
         e0 = self.DEP.error.mean()
         self.DEP = self.DEP.merge()
         e1 = self.DEP.error.mean()
-        its = 0
-        while its < NT and e1 - e0 < -mindelta*e0:
-            its += 1
+        self.itmax = self.its + NT
+        
+        # Value of self.converged tells what termination requirements were met
+        self.converged = 0
+        if isfinite(self.itmax):
+            self.converged += (self.its >= self.itmax)
+        if mindelta:
+            self.coverged += 2 * (e1-e0 > -mindelta*e0)
+        if target_error is not None:
+            self.converged += 4 * (self.DEP.error.min() < target_error)
+        
+        while not self.converged:
+            self.its += 1
             e0 = e1
             self.DEP = self.DEP.merge()
             e1 = self.DEP.error.mean()
+            emin = self.DEP.error.min()
             if verbose:
-                print its,e1
+                print(tag,self.its,e1,emin)
+            self.converged = 0
+            if isfinite(self.itmax):
+                self.converged += (self.its >= self.itmax)
+            if mindelta:
+                self.coverged += 2 * (e1-e0 > -mindelta*e0)
+            if target_error is not None:
+                self.converged += 4 * (emin < target_error)
             if saveFile is not None:
                 with open(saveFile,'w') as f:
                     dump(self,f)
+                    
+    def paramsMin(self):
+        
+        return self.DEP.paramsMin()
 
 
 # Cost function used by DEParams
